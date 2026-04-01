@@ -30,9 +30,10 @@ export async function runConversationTurn(params: {
   provider: DeepSeekProvider;
   tools: ToolDefinition<unknown>[];
   confirm: ConfirmationHandler;
+  sessionAllowedTools?: Set<string>;
   callbacks?: ConversationCallbacks;
 }): Promise<Session> {
-  const { session, prompt, provider, tools, confirm, callbacks } = params;
+  const { session, prompt, provider, tools, confirm, callbacks, sessionAllowedTools } = params;
   const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
   const userMessage = createMessage("user", prompt);
   session.messages.push(userMessage);
@@ -83,7 +84,11 @@ export async function runConversationTurn(params: {
     const toolResults = await executeToolCalls(
       assistantToolCalls,
       toolMap,
-      { workspaceRoot: session.workspaceRoot },
+      {
+        workspaceRoot: session.workspaceRoot,
+        sessionId: session.id,
+        sessionAllowedTools
+      },
       confirm,
       callbacks?.onToolEvent
     );

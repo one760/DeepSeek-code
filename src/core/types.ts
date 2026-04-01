@@ -1,4 +1,5 @@
 export type MessageRole = "system" | "user" | "assistant" | "tool";
+export type AppViewMode = "chat" | "resume" | "diff" | "permissions" | "confirm";
 
 export type ToolCall = {
   id: string;
@@ -32,8 +33,29 @@ export type Session = {
   model: string;
   createdAt: string;
   updatedAt: string;
+  lastActiveAt: string;
+  title: string;
+  lastPrompt: string;
+  messageCount: number;
   messages: ConversationMessage[];
 };
+
+export type SessionSummary = {
+  id: string;
+  workspaceRoot: string;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+  lastActiveAt: string;
+  title: string;
+  lastPrompt: string;
+  messageCount: number;
+};
+
+export type ResumeQueryResult =
+  | { type: "none"; query: string; matches: SessionSummary[] }
+  | { type: "single"; query: string; matches: [SessionSummary] }
+  | { type: "multiple"; query: string; matches: SessionSummary[] };
 
 export type HistoryEntry = {
   sessionId: string;
@@ -71,4 +93,23 @@ export type ResolvedConfig = {
   baseUrl: string;
   model: string;
   sources: ConfigSources;
+};
+
+export type PermissionScope = "session" | "workspace";
+
+export type PendingActionDecision = "once" | "session" | "always" | "deny";
+
+export type PermissionRule = {
+  toolName: string;
+  scope: PermissionScope;
+  createdAt: string;
+};
+
+export type RecentDiffPreview = {
+  sessionId: string;
+  toolName: string;
+  targetLabel: string;
+  preview: string;
+  createdAt: string;
+  truncated: boolean;
 };

@@ -6,6 +6,8 @@ export type AppPaths = {
   dataDir: string;
   logDir: string;
   tempDir: string;
+  permissionsDir: string;
+  recentDiffsDir: string;
   configFile: string;
   historyFile: string;
   sessionsDir: string;
@@ -19,6 +21,8 @@ function createPathsFromRoot(root: string): AppPaths {
     dataDir: path.join(root, "data"),
     logDir: path.join(root, "logs"),
     tempDir: path.join(root, "tmp"),
+    permissionsDir: path.join(root, "data", "permissions"),
+    recentDiffsDir: path.join(root, "data", "recent-diffs"),
     configFile: path.join(root, "config", "config.json"),
     historyFile: path.join(root, "data", "history.jsonl"),
     sessionsDir: path.join(root, "data", "sessions")
@@ -49,6 +53,8 @@ export function getAppPaths(): AppPaths {
     dataDir: paths.data,
     logDir: paths.log,
     tempDir: paths.temp,
+    permissionsDir: path.join(paths.data, "permissions"),
+    recentDiffsDir: path.join(paths.data, "recent-diffs"),
     configFile: path.join(paths.config, "config.json"),
     historyFile: path.join(paths.data, "history.jsonl"),
     sessionsDir: path.join(paths.data, "sessions")

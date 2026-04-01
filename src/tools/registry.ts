@@ -1,5 +1,6 @@
 import fg from "fast-glob";
 import { z } from "zod";
+import { buildEditPreview, buildWritePreview } from "../services/diffPreview.js";
 import { isPathInsideWorkspace, readTextFile, replaceInFile, resolveWorkspacePath, writeTextFile } from "../services/fs.js";
 import { getGitStatusSummary } from "../services/git.js";
 import { runShellCommand } from "../services/shell.js";
@@ -192,6 +193,12 @@ const writeFileTool: ToolDefinition<z.infer<typeof writeFileInput>> = {
   isReadOnly: false,
   requiresConfirmation: () => true,
   getConfirmationMessage: (input) => `Write file ${input.path}?`,
+  buildPreview: async (input, context) =>
+    buildWritePreview({
+      workspaceRoot: context.workspaceRoot,
+      path: input.path,
+      content: input.content
+    }),
   execute: async (input, context) => {
     const targetPath = resolveWorkspacePath(context.workspaceRoot, input.path);
     await writeTextFile(targetPath, input.content);
@@ -217,6 +224,14 @@ const editFileTool: ToolDefinition<z.infer<typeof editFileInput>> = {
   isReadOnly: false,
   requiresConfirmation: () => true,
   getConfirmationMessage: (input) => `Edit file ${input.path}?`,
+  buildPreview: async (input, context) =>
+    buildEditPreview({
+      workspaceRoot: context.workspaceRoot,
+      path: input.path,
+      oldText: input.oldText,
+      newText: input.newText,
+      replaceAll: input.replaceAll
+    }),
   execute: async (input, context) => {
     const targetPath = resolveWorkspacePath(context.workspaceRoot, input.path);
     const result = await replaceInFile(targetPath, input.oldText, input.newText, input.replaceAll);
@@ -241,6 +256,7 @@ const execShellTool: ToolDefinition<z.infer<typeof execShellInput>> = {
   },
   validator: execShellInput,
   isReadOnly: false,
+  allowsWorkspacePermission: false,
   requiresConfirmation: () => true,
   getConfirmationMessage: (input) => `Run shell command?\n${input.command}`,
   execute: async (input, context) => {

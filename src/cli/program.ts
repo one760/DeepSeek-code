@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import readline from "node:readline/promises";
 import process from "node:process";
+import { Writable } from "node:stream";
 import { APP_VERSION } from "../meta.js";
 import { runInteractiveApp } from "../app/runInteractiveApp.js";
 import { clearStoredApiKey, getConfigView, resolveConfig, setStoredApiKey } from "../services/config.js";
@@ -19,13 +20,45 @@ export type ProgramHandlers = {
 };
 
 async function promptForApiKey(): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    const apiKey = await rl.question("DeepSeek API Key: ");
+    rl.close();
+    return apiKey.trim();
+  }
+
+  let muted = true;
+  const silentOutput = new Writable({
+    write(chunk, encoding, callback) {
+      const text = chunk.toString();
+
+      if (!muted) {
+        process.stdout.write(text, encoding as BufferEncoding);
+      } else if (text.includes("\n")) {
+        process.stdout.write("\n");
+      }
+
+      callback();
+    }
+  });
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout
+    output: silentOutput,
+    terminal: true
   });
-  const apiKey = await rl.question("DeepSeek API Key: ");
-  rl.close();
-  return apiKey.trim();
+  process.stdout.write("DeepSeek API Key: ");
+
+  try {
+    const apiKey = await rl.question("");
+    process.stdout.write("\n");
+    return apiKey.trim();
+  } finally {
+    muted = false;
+    rl.close();
+  }
 }
 
 export function createDefaultHandlers(): ProgramHandlers {
