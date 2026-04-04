@@ -6,6 +6,21 @@ import type { HistoryEntry, RecentDiffPreview, Session, SessionSummary } from ".
 import { getAppPaths, setAppPathsOverride } from "./paths.js";
 import { isWindows } from "./platform.js";
 
+async function withWritableAppPaths<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== "EPERM" && nodeError.code !== "EACCES") {
+      throw error;
+    }
+
+    setAppPathsOverride(path.resolve(process.cwd(), ".deepseek-code"));
+    await ensureAppDirectories();
+    return operation();
+  }
+}
+
 export async function ensureAppDirectories(): Promise<void> {
   const createDirectories = async (): Promise<void> => {
     const paths = getAppPaths();
@@ -66,15 +81,19 @@ export async function tightenFilePermissions(filePath: string): Promise<void> {
 }
 
 export async function appendHistoryLine(entry: HistoryEntry): Promise<void> {
-  const paths = getAppPaths();
-  await fs.mkdir(path.dirname(paths.historyFile), { recursive: true });
-  await fs.appendFile(paths.historyFile, `${JSON.stringify(entry)}\n`, "utf8");
+  await withWritableAppPaths(async () => {
+    const paths = getAppPaths();
+    await fs.mkdir(path.dirname(paths.historyFile), { recursive: true });
+    await fs.appendFile(paths.historyFile, `${JSON.stringify(entry)}\n`, "utf8");
+  });
 }
 
 export async function saveSession(session: Session): Promise<void> {
-  const paths = getAppPaths();
-  await fs.mkdir(paths.sessionsDir, { recursive: true });
-  await writeJsonFile(path.join(paths.sessionsDir, `${session.id}.json`), enrichSession(session));
+  await withWritableAppPaths(async () => {
+    const paths = getAppPaths();
+    await fs.mkdir(paths.sessionsDir, { recursive: true });
+    await writeJsonFile(path.join(paths.sessionsDir, `${session.id}.json`), enrichSession(session));
+  });
 }
 
 export function createSession(workspaceRoot: string, model: string): Session {
@@ -180,9 +199,11 @@ export function hashWorkspaceRoot(workspaceRoot: string): string {
 }
 
 export async function saveRecentDiffPreview(preview: RecentDiffPreview): Promise<void> {
-  const paths = getAppPaths();
-  await fs.mkdir(paths.recentDiffsDir, { recursive: true });
-  await writeJsonFile(path.join(paths.recentDiffsDir, `${preview.sessionId}.json`), preview);
+  await withWritableAppPaths(async () => {
+    const paths = getAppPaths();
+    await fs.mkdir(paths.recentDiffsDir, { recursive: true });
+    await writeJsonFile(path.join(paths.recentDiffsDir, `${preview.sessionId}.json`), preview);
+  });
 }
 
 export async function loadRecentDiffPreview(sessionId: string): Promise<RecentDiffPreview | null> {

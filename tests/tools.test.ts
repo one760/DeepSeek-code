@@ -85,4 +85,65 @@ describe("tool confirmation policies", () => {
     expect(preview?.targetLabel).toBe("notes.txt");
     expect(preview?.preview).toContain("+++ b/notes.txt");
   });
+
+  it("lists directory metadata with the new list_directory tool", async () => {
+    const directoryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "deepseek-code-list-directory-"));
+    await fs.writeFile(path.join(directoryRoot, "alpha.txt"), "alpha", "utf8");
+
+    const results = await executeToolCalls(
+      [
+        {
+          id: "tool-2",
+          name: "list_directory",
+          input: {
+            path: directoryRoot,
+            maxEntries: 10
+          }
+        }
+      ],
+      registry,
+      {
+        workspaceRoot,
+        sessionId: "session-2",
+        sessionAllowedTools: new Set<string>()
+      },
+      async () => "once"
+    );
+
+    expect(results[0]?.success).toBe(true);
+    expect(results[0]?.output).toContain("alpha.txt");
+  });
+
+  it("supports regex replacements in edit_file", async () => {
+    const filePath = path.join(workspaceRoot, "notes.md");
+    await fs.mkdir(workspaceRoot, { recursive: true });
+    await fs.writeFile(filePath, "version=1\nversion=2\n", "utf8");
+
+    const results = await executeToolCalls(
+      [
+        {
+          id: "tool-3",
+          name: "edit_file",
+          input: {
+            path: filePath,
+            oldText: "version=(\\d+)",
+            newText: "release=$1",
+            replaceAll: true,
+            useRegex: true
+          }
+        }
+      ],
+      registry,
+      {
+        workspaceRoot,
+        sessionId: "session-3",
+        sessionAllowedTools: new Set<string>()
+      },
+      async () => "once"
+    );
+
+    expect(results[0]?.success).toBe(true);
+    expect(await fs.readFile(filePath, "utf8")).toContain("release=1");
+    expect(await fs.readFile(filePath, "utf8")).toContain("release=2");
+  });
 });

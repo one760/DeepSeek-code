@@ -1,5 +1,6 @@
 export type MessageRole = "system" | "user" | "assistant" | "tool";
 export type AppViewMode = "chat" | "resume" | "diff" | "permissions" | "confirm";
+export type ToolStrategy = "native" | "prompt-fallback";
 
 export type ToolCall = {
   id: string;
@@ -16,16 +17,33 @@ export type ConversationMessage = {
   toolCalls?: ToolCall[];
 };
 
+export type ApiConversationMessage = ConversationMessage & {
+  reasoningContent?: string;
+};
+
 export type TokenUsage = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
 };
 
+export type SessionTokenUsage = {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  turnCount: number;
+};
+
 export type ModelEvent =
   | { type: "text-delta"; text: string }
   | { type: "tool-calls"; calls: ToolCall[] }
-  | { type: "response-complete"; usage?: TokenUsage };
+  | { type: "retry"; attempt: number; error: string; delayMs: number }
+  | {
+      type: "response-complete";
+      usage?: TokenUsage;
+      reasoningContent?: string;
+      toolStrategy?: ToolStrategy;
+    };
 
 export type Session = {
   id: string;
@@ -38,6 +56,7 @@ export type Session = {
   lastPrompt: string;
   messageCount: number;
   messages: ConversationMessage[];
+  tokenUsage?: SessionTokenUsage;
 };
 
 export type SessionSummary = {

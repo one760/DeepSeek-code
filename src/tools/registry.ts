@@ -1,7 +1,14 @@
 import fg from "fast-glob";
 import { z } from "zod";
 import { buildEditPreview, buildWritePreview } from "../services/diffPreview.js";
-import { isPathInsideWorkspace, readTextFile, replaceInFile, resolveWorkspacePath, writeTextFile } from "../services/fs.js";
+import {
+  isPathInsideWorkspace,
+  listDirectory,
+  readTextFile,
+  replaceInFile,
+  resolveWorkspacePath,
+  writeTextFile
+} from "../services/fs.js";
 import { getGitStatusSummary } from "../services/git.js";
 import { runShellCommand } from "../services/shell.js";
 import type { ToolDefinition, ToolRegistry, ToolResult } from "./types.js";
@@ -32,7 +39,15 @@ const editFileInput = z.object({
   path: z.string().min(1),
   oldText: z.string(),
   newText: z.string(),
-  replaceAll: z.boolean().optional()
+  replaceAll: z.boolean().optional(),
+  useRegex: z.boolean().optional()
+});
+
+const listDirectoryInput = z.object({
+  path: z.string().min(1).optional(),
+  recursive: z.boolean().optional(),
+  maxDepth: z.number().int().positive().max(10).optional(),
+  maxEntries: z.number().int().positive().max(500).optional()
 });
 
 const execShellInput = z.object({
@@ -206,6 +221,35 @@ const writeFileTool: ToolDefinition<z.infer<typeof writeFileInput>> = {
   }
 };
 
+const listDirectoryTool: ToolDefinition<z.infer<typeof listDirectoryInput>> = {
+  name: "list_directory",
+  description: "List directory entries and basic metadata.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "Directory path relative to the workspace." },
+      recursive: { type: "boolean", description: "Whether to recurse into subdirectories." },
+      maxDepth: { type: "number", description: "Maximum recursion depth." },
+      maxEntries: { type: "number", description: "Maximum number of entries to return." }
+    },
+    additionalProperties: false
+  },
+  validator: listDirectoryInput,
+  isReadOnly: true,
+  requiresConfirmation: (input, context) =>
+    input.path ? outsideWorkspaceRequiresConfirmation(input.path, context.workspaceRoot) : false,
+  getConfirmationMessage: (input) => `List directory outside workspace root via path=${input.path}?`,
+  execute: async (input, context) => {
+    const targetPath = resolveWorkspacePath(context.workspaceRoot, input.path ?? ".");
+    const entries = await listDirectory(targetPath, {
+      recursive: input.recursive,
+      maxDepth: input.maxDepth,
+      maxEntries: input.maxEntries
+    });
+    return ok(JSON.stringify(entries, null, 2));
+  }
+};
+
 const editFileTool: ToolDefinition<z.infer<typeof editFileInput>> = {
   name: "edit_file",
   description: "Replace a text segment in a file.",
@@ -215,7 +259,8 @@ const editFileTool: ToolDefinition<z.infer<typeof editFileInput>> = {
       path: { type: "string", description: "Path to the file to edit." },
       oldText: { type: "string", description: "Existing text to replace." },
       newText: { type: "string", description: "Replacement text." },
-      replaceAll: { type: "boolean", description: "Replace all matches." }
+      replaceAll: { type: "boolean", description: "Replace all matches." },
+      useRegex: { type: "boolean", description: "Interpret oldText as a JavaScript regex source." }
     },
     required: ["path", "oldText", "newText"],
     additionalProperties: false
@@ -230,11 +275,18 @@ const editFileTool: ToolDefinition<z.infer<typeof editFileInput>> = {
       path: input.path,
       oldText: input.oldText,
       newText: input.newText,
-      replaceAll: input.replaceAll
+      replaceAll: input.replaceAll,
+      useRegex: input.useRegex
     }),
   execute: async (input, context) => {
     const targetPath = resolveWorkspacePath(context.workspaceRoot, input.path);
-    const result = await replaceInFile(targetPath, input.oldText, input.newText, input.replaceAll);
+    const result = await replaceInFile(
+      targetPath,
+      input.oldText,
+      input.newText,
+      input.replaceAll,
+      input.useRegex
+    );
     if (!result.updated) {
       return fail(`No matching text found in ${input.path}`);
     }
@@ -297,6 +349,7 @@ export function createToolRegistry(): ToolRegistry {
     readFileTool,
     globTool,
     grepTool,
+    listDirectoryTool,
     writeFileTool,
     editFileTool,
     execShellTool,

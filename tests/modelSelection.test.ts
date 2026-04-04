@@ -18,5 +18,6 @@ describe("model selection", () => {
     expect(help).toContain("Current model: deepseek-chat");
     expect(help).toContain("Switch with `/model <name>`.");
     expect(help).toContain("Aliases: chat, reasoner");
+    expect(help).toContain("deepseek-reasoner uses adaptive tools with fallback");
   });
 });

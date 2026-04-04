@@ -1,7 +1,7 @@
 {
   "name": "deepseek-code",
   "version": "0.1.0",
-  "description": "Deepseek Code MVP CLI",
+  "description": "Interactive coding CLI for DeepSeek with tools, sessions, and terminal UI",
   "type": "module",
   "license": "MIT",
   "bin": {

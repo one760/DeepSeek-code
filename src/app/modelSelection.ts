@@ -19,6 +19,7 @@ export function formatModelHelp(currentModel: string): string {
     "Switch with `/model <name>`.",
     `Built-ins: ${BUILTIN_MODELS.join(", ")}`,
     "Aliases: chat, reasoner",
+    "Capabilities: deepseek-chat supports native tools; deepseek-reasoner uses adaptive tools with fallback.",
     "Custom model names are also supported."
   ].join("\n");
 }

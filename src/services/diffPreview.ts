@@ -116,13 +116,23 @@ export async function buildEditPreview(params: {
   oldText: string;
   newText: string;
   replaceAll?: boolean;
+  useRegex?: boolean;
 }): Promise<DiffPreview> {
-  const { workspaceRoot, path, oldText, newText, replaceAll = false } = params;
+  const {
+    workspaceRoot,
+    path,
+    oldText,
+    newText,
+    replaceAll = false,
+    useRegex = false
+  } = params;
   const targetPath = resolveWorkspacePath(workspaceRoot, path);
   const beforeText = await readTextFile(targetPath);
-  const afterText = replaceAll
-    ? beforeText.split(oldText).join(newText)
-    : beforeText.replace(oldText, newText);
+  const afterText = useRegex
+    ? beforeText.replace(new RegExp(oldText, replaceAll ? "g" : ""), newText)
+    : replaceAll
+      ? beforeText.split(oldText).join(newText)
+      : beforeText.replace(oldText, newText);
 
   return createUnifiedDiff({
     pathLabel: path,
