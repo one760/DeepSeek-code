@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveConfig, saveStoredConfig } from "../src/services/config.js";
+import { loadStoredConfig, resolveConfig, saveStoredConfig, saveStoredLoggingConfig } from "../src/services/config.js";
 import { clearAppPathsOverride, getAppPaths } from "../src/services/paths.js";
 
 describe("resolveConfig", () => {
@@ -59,5 +59,25 @@ describe("resolveConfig", () => {
     expect(resolved.baseUrl).toBe("https://api.deepseek.com");
     expect(resolved.model).toBe("deepseek-chat");
     expect(paths.configFile.startsWith(tempRoot)).toBe(true);
+  });
+
+  it("persists logging configuration alongside the rest of config", async () => {
+    await saveStoredConfig({
+      apiKey: "stored-key"
+    });
+
+    await saveStoredLoggingConfig({
+      level: "debug",
+      format: "json",
+      enableColors: false
+    });
+
+    const stored = await loadStoredConfig();
+    expect(stored.apiKey).toBe("stored-key");
+    expect(stored.logging).toEqual({
+      level: "debug",
+      format: "json",
+      enableColors: false
+    });
   });
 });

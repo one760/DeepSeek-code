@@ -5,25 +5,56 @@ import { createHash, randomUUID } from "node:crypto";
 import type { HistoryEntry, RecentDiffPreview, Session, SessionSummary } from "../core/types.js";
 import { getAppPaths, setAppPathsOverride } from "./paths.js";
 import { isWindows } from "./platform.js";
+import { createFsError, handleFileOperation, logErrorSilently } from "../core/errorHandlers.js";
+import { getLogger } from "../core/logger.js";
 
 async function withWritableAppPaths<T>(operation: () => Promise<T>): Promise<T> {
+  const logger = getLogger();
+
   try {
     return await operation();
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
+
+    // 只处理权限错误，其他错误直接抛出
     if (nodeError.code !== "EPERM" && nodeError.code !== "EACCES") {
-      throw error;
+      throw createFsError(
+        `文件操作失败: ${nodeError.message}`,
+        undefined,
+        "write",
+        nodeError
+      );
     }
 
-    setAppPathsOverride(path.resolve(process.cwd(), ".deepseek-code"));
-    await ensureAppDirectories();
-    return operation();
+    logger.warn("检测到权限问题，尝试使用备用目录", {
+      originalError: nodeError.message,
+      code: nodeError.code
+    });
+
+    // 尝试使用当前目录下的备用目录
+    const fallbackDir = path.resolve(process.cwd(), ".deepseek-code");
+    setAppPathsOverride(fallbackDir);
+
+    try {
+      await ensureAppDirectories();
+      return await operation();
+    } catch (fallbackError) {
+      throw createFsError(
+        "无法创建或访问应用程序目录。请检查文件权限或磁盘空间。",
+        fallbackDir,
+        "create_directory",
+        fallbackError as Error
+      );
+    }
   }
 }
 
 export async function ensureAppDirectories(): Promise<void> {
+  const logger = getLogger();
   const createDirectories = async (): Promise<void> => {
     const paths = getAppPaths();
+    logger.debug("创建应用程序目录", { paths });
+
     await Promise.all([
       fs.mkdir(paths.configDir, { recursive: true }),
       fs.mkdir(paths.dataDir, { recursive: true }),
@@ -39,32 +70,71 @@ export async function ensureAppDirectories(): Promise<void> {
     await createDirectories();
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
+
+    // 只处理权限错误，其他错误直接抛出
     if (nodeError.code !== "EPERM" && nodeError.code !== "EACCES") {
-      throw error;
+      throw createFsError(
+        `创建目录失败: ${nodeError.message}`,
+        undefined,
+        "create_directory",
+        nodeError
+      );
     }
 
-    setAppPathsOverride(path.resolve(process.cwd(), ".deepseek-code"));
-    await createDirectories();
+    logger.warn("主目录权限不足，尝试备用目录", {
+      error: nodeError.message,
+      code: nodeError.code
+    });
+
+    // 尝试使用当前目录下的备用目录
+    const fallbackDir = path.resolve(process.cwd(), ".deepseek-code");
+    setAppPathsOverride(fallbackDir);
+
+    try {
+      await createDirectories();
+      logger.info("已使用备用目录", { fallbackDir });
+    } catch (fallbackError) {
+      const fallbackNodeError = fallbackError as NodeJS.ErrnoException;
+      throw createFsError(
+        `无法创建应用程序目录。请检查权限和磁盘空间。`,
+        fallbackDir,
+        "create_directory",
+        fallbackNodeError
+      );
+    }
   }
 }
 
 export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
-  try {
-    const content = await fs.readFile(filePath, "utf8");
-    return JSON.parse(content) as T;
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === "ENOENT") {
-      return fallback;
+  return handleFileOperation(
+    async () => {
+      const content = await fs.readFile(filePath, "utf8");
+      return JSON.parse(content) as T;
+    },
+    {
+      filePath,
+      operation: "read",
+      fallback
     }
-
-    throw error;
-  }
+  );
 }
 
 export async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+  const logger = getLogger();
+
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+    logger.debug("文件写入成功", { filePath });
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    throw createFsError(
+      `写入文件失败: ${nodeError.message}`,
+      filePath,
+      "write",
+      nodeError
+    );
+  }
 }
 
 export async function tightenFilePermissions(filePath: string): Promise<void> {
@@ -75,8 +145,9 @@ export async function tightenFilePermissions(filePath: string): Promise<void> {
   try {
     await fs.access(filePath, fsConstants.F_OK);
     await fs.chmod(filePath, 0o600);
-  } catch {
-    return;
+  } catch (error) {
+    // 静默处理权限调整失败，不影响主要功能
+    logErrorSilently(error, { filePath, operation: "tighten_permissions" });
   }
 }
 

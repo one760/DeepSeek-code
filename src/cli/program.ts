@@ -4,11 +4,14 @@ import process from "node:process";
 import { Writable } from "node:stream";
 import { APP_VERSION } from "../meta.js";
 import { runInteractiveApp } from "../app/runInteractiveApp.js";
-import { clearStoredApiKey, getConfigView, resolveConfig, setStoredApiKey } from "../services/config.js";
+import { clearStoredApiKey, getConfigView, resolveConfig, saveStoredLoggingConfig, setStoredApiKey } from "../services/config.js";
 import { ensureAppDirectories } from "../services/storage.js";
 import { getWorkspaceRoot } from "../services/platform.js";
 import { getGitStatusSummary } from "../services/git.js";
 import { checkNetworkConnectivity } from "../services/network.js";
+import { configureLogger, getLogger } from "../core/logger.js";
+import { createAuthError, createInputError, displayUserFriendlyError } from "../core/errorHandlers.js";
+import { resolveLoggerOptions } from "../services/loggerConfig.js";
 
 export type ProgramHandlers = {
   interactive: () => Promise<void>;
@@ -17,6 +20,7 @@ export type ProgramHandlers = {
   doctor: () => Promise<void>;
   version: () => Promise<void>;
   config: () => Promise<void>;
+  logLevel: (level: string) => Promise<void>;
 };
 
 async function promptForApiKey(): Promise<string> {
@@ -65,58 +69,99 @@ export function createDefaultHandlers(): ProgramHandlers {
   return {
     interactive: runInteractiveApp,
     login: async (providedApiKey?: string) => {
-      const apiKey = providedApiKey || (await promptForApiKey());
-      if (!apiKey) {
-        throw new Error("API key is required.");
-      }
+      const logger = getLogger();
+      try {
+        const apiKey = providedApiKey || (await promptForApiKey());
+        if (!apiKey) {
+          throw createAuthError("API密钥是必需的。请提供有效的DeepSeek API密钥。");
+        }
 
-      await setStoredApiKey(apiKey);
-      console.log("API key saved.");
+        await setStoredApiKey(apiKey);
+        logger.debug("API key saved");
+        console.log("API key saved.");
+      } catch (error) {
+        displayUserFriendlyError(error);
+        throw error;
+      }
     },
     logout: async () => {
+      const logger = getLogger();
       await clearStoredApiKey();
+      logger.debug("Stored API key removed");
       console.log("Stored API key removed.");
     },
     doctor: async () => {
+      const logger = getLogger();
+      logger.debug("Running doctor command");
+
       await ensureAppDirectories();
       const config = await resolveConfig();
       const git = await getGitStatusSummary(getWorkspaceRoot());
       const network = await checkNetworkConnectivity(config.baseUrl);
 
-      console.log(
-        JSON.stringify(
-          {
-            node: process.version,
-            workspaceRoot: getWorkspaceRoot(),
-            apiKeyConfigured: Boolean(config.apiKey),
-            baseUrl: config.baseUrl,
-            model: config.model,
-            network,
-            git
-          },
-          null,
-          2
-        )
-      );
+      const doctorInfo = {
+        node: process.version,
+        workspaceRoot: getWorkspaceRoot(),
+        apiKeyConfigured: Boolean(config.apiKey),
+        baseUrl: config.baseUrl,
+        model: config.model,
+        network,
+        git
+      };
+
+      logger.debug("Doctor check completed", { doctorInfo });
+      console.log(JSON.stringify(doctorInfo, null, 2));
     },
     version: async () => {
+      const logger = getLogger();
+      logger.debug("Showing version", { version: APP_VERSION });
       console.log(APP_VERSION);
     },
     config: async () => {
+      const logger = getLogger();
+      logger.debug("Showing configuration");
+
       const view = await getConfigView();
-      console.log(
-        JSON.stringify(
-          {
-            paths: view.paths,
-            resolved: {
-              ...view.resolved,
-              apiKey: view.resolved.apiKey ? "***redacted***" : undefined
-            }
-          },
-          null,
-          2
-        )
-      );
+      const configOutput = {
+        paths: view.paths,
+        resolved: {
+          ...view.resolved,
+          apiKey: view.resolved.apiKey ? "***redacted***" : undefined
+        }
+      };
+
+      logger.debug("Configuration retrieved", { config: configOutput });
+      console.log(JSON.stringify(configOutput, null, 2));
+    },
+    logLevel: async (level: string) => {
+      try {
+        const validLevels = ['debug', 'info', 'warn', 'error'];
+        const normalizedLevel = level.toLowerCase();
+
+        if (!validLevels.includes(normalizedLevel)) {
+          throw createInputError(
+            `无效的日志级别: ${level}`,
+            level,
+            `必须是以下值之一: ${validLevels.join(', ')}`
+          );
+        }
+
+        await saveStoredLoggingConfig({
+          level: normalizedLevel as "debug" | "info" | "warn" | "error"
+        });
+
+        configureLogger({
+          ...(await resolveLoggerOptions()),
+          level: normalizedLevel as "debug" | "info" | "warn" | "error"
+        });
+
+        const logger = getLogger();
+        logger.debug("Log level updated", { newLevel: normalizedLevel });
+        console.log(`日志级别已设置为: ${normalizedLevel}`);
+      } catch (error) {
+        displayUserFriendlyError(error);
+        throw error;
+      }
     }
   };
 }
@@ -124,6 +169,35 @@ export function createDefaultHandlers(): ProgramHandlers {
 export function createProgram(handlers: ProgramHandlers = createDefaultHandlers()): Command {
   const program = new Command("deepseek");
   program.description("Deepseek CLI");
+
+  // Global options for logging
+  program
+    .option("--log-level <level>", "Set log level (debug, info, warn, error)")
+    .option("--log-format <format>", "Set log format (json, text)")
+    .option("--no-colors", "Disable colored output")
+    .hook("preAction", async (thisCommand) => {
+      const options = thisCommand.opts();
+      const loggerOptions: Parameters<typeof configureLogger>[0] = {};
+
+      if (thisCommand.getOptionValueSource("logLevel") !== "default") {
+        loggerOptions.level = options.logLevel as "debug" | "info" | "warn" | "error";
+      }
+
+      if (thisCommand.getOptionValueSource("logFormat") !== "default") {
+        loggerOptions.format = options.logFormat as "json" | "text";
+      }
+
+      if (thisCommand.getOptionValueSource("colors") !== "default") {
+        loggerOptions.enableColors = options.colors as boolean;
+      }
+
+      if (Object.keys(loggerOptions).length > 0) {
+        configureLogger({
+          ...(await resolveLoggerOptions()),
+          ...loggerOptions
+        });
+      }
+    });
 
   const code = new Command("code").description("Deepseek Code interactive CLI");
   code.action(async () => {
@@ -161,11 +235,19 @@ export function createProgram(handlers: ProgramHandlers = createDefaultHandlers(
       await handlers.config();
     });
 
+  code
+    .command("log-level <level>")
+    .description("Set log level (debug, info, warn, error)")
+    .action(async (level: string) => {
+      await handlers.logLevel(level);
+    });
+
   program.addCommand(code);
   return program;
 }
 
 export async function runCli(argv = process.argv): Promise<void> {
+  configureLogger(await resolveLoggerOptions());
   const program = createProgram();
   await program.parseAsync(argv);
 }

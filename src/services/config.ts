@@ -33,6 +33,21 @@ export async function clearStoredApiKey(): Promise<void> {
   await saveStoredConfig(next);
 }
 
+export async function saveStoredLoggingConfig(logging: StoredConfig["logging"]): Promise<void> {
+  const current = await loadStoredConfig();
+  const next: StoredConfig = {
+    ...current
+  };
+
+  if (logging && Object.keys(logging).length > 0) {
+    next.logging = logging;
+  } else {
+    delete next.logging;
+  }
+
+  await saveStoredConfig(next);
+}
+
 export async function resolveConfig(overrides: RuntimeOverrides = {}): Promise<ResolvedConfig> {
   const stored = await loadStoredConfig();
 

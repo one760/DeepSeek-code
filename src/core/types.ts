@@ -99,6 +99,11 @@ export type StoredConfig = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  logging?: {
+    level?: 'debug' | 'info' | 'warn' | 'error';
+    format?: 'json' | 'text';
+    enableColors?: boolean;
+  };
 };
 
 export type RuntimeOverrides = {

@@ -3,6 +3,7 @@ import { allowWorkspaceTool, resolvePermissionDecision } from "../services/permi
 import { saveRecentDiffPreview } from "../services/storage.js";
 import type { ToolCall } from "../core/types.js";
 import type { PendingAction, ToolDefinition, ToolExecutionContext, ToolResult } from "./types.js";
+import { getLogger } from "../core/logger.js";
 
 export type ConfirmationHandler = (request: PendingAction) => Promise<PendingActionDecision>;
 
@@ -56,8 +57,10 @@ async function executeSingleTool(
   confirm: ConfirmationHandler,
   onEvent?: (event: ToolRunEvent) => void
 ): Promise<ToolMessageResult> {
+  const logger = getLogger();
   const definition = definitions.get(toolCall.name);
   if (!definition) {
+    logger.error('Tool not found', { toolName: toolCall.name });
     return {
       toolCallId: toolCall.id,
       toolName: toolCall.name,
@@ -66,8 +69,18 @@ async function executeSingleTool(
     };
   }
 
+  logger.debug('Starting tool execution', {
+    toolName: definition.name,
+    toolCallId: toolCall.id,
+    workspaceRoot: context.workspaceRoot
+  });
+
   const parsed = definition.validator.safeParse(toolCall.input);
   if (!parsed.success) {
+    logger.warn('Tool input validation failed', {
+      toolName: definition.name,
+      error: parsed.error.message
+    });
     return {
       toolCallId: toolCall.id,
       toolName: toolCall.name,
@@ -159,6 +172,12 @@ async function executeSingleTool(
   const result = await definition.execute(parsed.data, context);
   onEvent?.({ type: "tool-end", toolName: definition.name, result });
 
+  logger.debug('Tool execution completed', {
+    toolName: definition.name,
+    success: result.success,
+    toolCallId: toolCall.id
+  });
+
   return {
     toolCallId: toolCall.id,
     toolName: definition.name,
@@ -174,6 +193,12 @@ export async function executeToolCalls(
   confirm: ConfirmationHandler,
   onEvent?: (event: ToolRunEvent) => void
 ): Promise<ToolMessageResult[]> {
+  const logger = getLogger();
+
+  logger.debug('Starting batch tool execution', {
+    toolCallCount: toolCalls.length,
+    workspaceRoot: context.workspaceRoot
+  });
   const results: ToolMessageResult[] = [];
   const batches = partitionToolCalls(toolCalls, definitions);
 
@@ -194,6 +219,13 @@ export async function executeToolCalls(
       );
     }
   }
+
+  const successCount = results.filter(r => r.success).length;
+  logger.debug('Batch tool execution completed', {
+    totalTools: results.length,
+    successfulTools: successCount,
+    failedTools: results.length - successCount
+  });
 
   return results;
 }

@@ -20,6 +20,8 @@ import {
   parseToolCallsFromText
 } from "./promptToolCalling.js";
 import { withRetry } from "./retry.js";
+import { getLogger } from "../../core/logger.js";
+import { createAuthError, createApiError, handleApiCall } from "../../core/errorHandlers.js";
 
 export type ModelProvider = {
   streamChat: (
@@ -47,7 +49,9 @@ type StreamFactory = (params: {
 
 function createOpenAIStreamFactory(config: ResolvedConfig): StreamFactory {
   if (!config.apiKey) {
-    throw new Error("Missing DeepSeek API key. Run `deepseek code login` first.");
+    throw createAuthError(
+      `缺少DeepSeek API密钥。请先运行 \`deepseek code login\` 命令进行登录。当前来源: ${config.sources.apiKey}。`
+    );
   }
 
   const client = new OpenAI({
@@ -55,14 +59,23 @@ function createOpenAIStreamFactory(config: ResolvedConfig): StreamFactory {
     baseURL: config.baseUrl
   });
 
-  return async (params) =>
-    client.chat.completions.create({
-      model: params.model,
-      messages: params.messages,
-      ...(params.tools?.length ? { tools: params.tools } : {}),
-      stream_options: params.stream_options,
-      stream: true
-    });
+  return async (params) => {
+    return handleApiCall(
+      () =>
+        client.chat.completions.create({
+          model: params.model,
+          messages: params.messages,
+          ...(params.tools?.length ? { tools: params.tools } : {}),
+          stream_options: params.stream_options,
+          stream: true
+        }),
+      {
+        endpoint: config.baseUrl,
+        operation: "chat.completions.create",
+        maxRetries: 3
+      }
+    );
+  };
 }
 
 export function isReasonerModel(model: string): boolean {
@@ -239,10 +252,12 @@ async function* iterateChunks(params: {
 export class DeepSeekProvider implements ModelProvider {
   private readonly streamFactory: StreamFactory;
   private readonly defaultModel: string;
+  private readonly logger;
 
   constructor(config: ResolvedConfig, streamFactory = createOpenAIStreamFactory(config)) {
     this.streamFactory = streamFactory;
     this.defaultModel = config.model;
+    this.logger = getLogger().child({ component: 'DeepSeekProvider', model: config.model });
   }
 
   private async *streamWithNativeTools(
@@ -419,7 +434,14 @@ export class DeepSeekProvider implements ModelProvider {
     tools: ToolDefinition<unknown>[],
     options?: { model?: string }
   ): AsyncIterable<ModelEvent> {
+    const logger = getLogger();
     const model = options?.model ?? this.defaultModel;
+
+    logger.debug('Starting streamChat', {
+      model,
+      messageCount: messages.length,
+      toolCount: tools.length
+    });
 
     if (tools.length === 0) {
       for await (const event of this.streamWithNativeTools(messages, tools, model)) {
@@ -440,13 +462,26 @@ export class DeepSeekProvider implements ModelProvider {
         yield event;
       }
     } catch (error) {
+      logger.warn('Error in native tools streaming', {
+        model,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
       if (!shouldFallbackToPromptToolCalling(error)) {
+        logger.error('Unrecoverable error in streamChat', {
+          model,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
         throw error;
       }
 
+      logger.info('Falling back to prompt tool calling', { model });
       for await (const event of this.streamWithPromptFallback(messages, tools, model)) {
         yield event;
       }
     }
+
+    logger.debug('streamChat completed', { model });
   }
 }
